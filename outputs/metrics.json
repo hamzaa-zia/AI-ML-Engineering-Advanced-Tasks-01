@@ -1,0 +1,53 @@
+{
+  "accuracy": 0.7395315826827538,
+  "precision": 0.5060449050086355,
+  "recall": 0.7834224598930482,
+  "f1": 0.614900314795383,
+  "roc_auc": 0.8405926270376398,
+  "confusion_matrix": [
+    [
+      749,
+      286
+    ],
+    [
+      81,
+      293
+    ]
+  ],
+  "classification_report": {
+    "No Churn": {
+      "precision": 0.9024096385542169,
+      "recall": 0.7236714975845411,
+      "f1-score": 0.8032171581769437,
+      "support": 1035.0
+    },
+    "Churn": {
+      "precision": 0.5060449050086355,
+      "recall": 0.7834224598930482,
+      "f1-score": 0.614900314795383,
+      "support": 374.0
+    },
+    "accuracy": 0.7395315826827538,
+    "macro avg": {
+      "precision": 0.7042272717814262,
+      "recall": 0.7535469787387946,
+      "f1-score": 0.7090587364861634,
+      "support": 1409.0
+    },
+    "weighted avg": {
+      "precision": 0.7971999789757588,
+      "recall": 0.7395315826827538,
+      "f1-score": 0.7532309981877998,
+      "support": 1409.0
+    }
+  },
+  "best_cv_score": 0.8459632485387553,
+  "best_params": {
+    "classifier": "LogisticRegression",
+    "classifier__C": 10.0,
+    "classifier__penalty": "l2"
+  },
+  "scoring": "roc_auc",
+  "train_rows": 5634,
+  "test_rows": 1409
+}
