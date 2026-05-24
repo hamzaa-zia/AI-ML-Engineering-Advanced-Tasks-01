@@ -8,7 +8,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from churn_pipeline import TARGET_COLUMN
+from churn_pipeline import ID_COLUMN, TARGET_COLUMN, assign_risk_levels, predict_churn_labels
 
 
 DEFAULT_MODEL_PATH = Path("outputs") / "telco_churn_pipeline.joblib"
@@ -55,11 +55,15 @@ def main() -> None:
     prediction_features = data.drop(columns=[TARGET_COLUMN], errors="ignore")
 
     churn_probability = model.predict_proba(prediction_features)[:, 1]
-    predicted_class = model.predict(prediction_features)
 
-    output = data.copy()
+    identifier_columns = [
+        column for column in [ID_COLUMN, TARGET_COLUMN] if column in data.columns
+    ]
+
+    output = data[identifier_columns].copy()
     output["churn_probability"] = churn_probability
-    output["predicted_churn"] = pd.Series(predicted_class).map({0: "No", 1: "Yes"})
+    output["predicted_churn"] = predict_churn_labels(churn_probability)
+    output["risk_level"] = assign_risk_levels(churn_probability)
 
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(args.output_path, index=False)

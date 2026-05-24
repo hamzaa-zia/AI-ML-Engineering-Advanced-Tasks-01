@@ -1,0 +1,200 @@
+{
+  "accuracy": 0.7395315826827538,
+  "precision": 0.5060449050086355,
+  "recall": 0.7834224598930482,
+  "f1": 0.614900314795383,
+  "roc_auc": 0.8405926270376398,
+  "average_precision": 0.6268976625577385,
+  "confusion_matrix": [
+    [
+      749,
+      286
+    ],
+    [
+      81,
+      293
+    ]
+  ],
+  "confusion_matrix_breakdown": {
+    "true_no_churn": 749,
+    "false_churn_alerts": 286,
+    "missed_churn_customers": 81,
+    "correctly_identified_churn": 293
+  },
+  "churn_focus": {
+    "actual_churn_customers": 374,
+    "actual_no_churn_customers": 1035,
+    "predicted_churn_customers": 579,
+    "predicted_no_churn_customers": 830,
+    "correctly_identified_churn": 293,
+    "missed_churn_customers": 81,
+    "false_churn_alerts": 286,
+    "true_no_churn": 749,
+    "churn_capture_rate_recall": 0.7834224598930482,
+    "churn_alert_precision": 0.5060449050086355,
+    "churn_miss_rate": 0.21657754010695188,
+    "false_alarm_rate": 0.2763285024154589,
+    "predicted_churn_rate": 0.41092973740241306,
+    "actual_churn_rate": 0.2654364797728886
+  },
+  "risk_tier_summary": [
+    {
+      "risk_level": "Low Risk",
+      "total_customers": 830,
+      "actual_churners": 81,
+      "actual_non_churners": 749,
+      "actual_churn_rate": 0.09759036144578313,
+      "share_of_test_customers": 0.589070262597587,
+      "share_of_actual_churners": 0.21657754010695188,
+      "avg_churn_probability": 0.19102103138928445,
+      "min_churn_probability": 0.0052170849739785925,
+      "max_churn_probability": 0.4999671407452939
+    },
+    {
+      "risk_level": "Moderate Risk",
+      "total_customers": 368,
+      "actual_churners": 144,
+      "actual_non_churners": 224,
+      "actual_churn_rate": 0.391304347826087,
+      "share_of_test_customers": 0.26117814052519517,
+      "share_of_actual_churners": 0.3850267379679144,
+      "avg_churn_probability": 0.6704263986080593,
+      "min_churn_probability": 0.5008430732503505,
+      "max_churn_probability": 0.7996524815439358
+    },
+    {
+      "risk_level": "High Risk",
+      "total_customers": 211,
+      "actual_churners": 149,
+      "actual_non_churners": 62,
+      "actual_churn_rate": 0.7061611374407583,
+      "share_of_test_customers": 0.1497515968772179,
+      "share_of_actual_churners": 0.3983957219251337,
+      "avg_churn_probability": 0.8552443800725005,
+      "min_churn_probability": 0.8000379397723825,
+      "max_churn_probability": 0.9374211506905405
+    }
+  ],
+  "threshold_metrics": [
+    {
+      "threshold": 0.3,
+      "accuracy": 0.6543647977288858,
+      "precision": 0.42998760842627015,
+      "recall": 0.9278074866310161,
+      "f1": 0.5876375952582558,
+      "predicted_churn_customers": 807,
+      "correctly_identified_churn": 347,
+      "missed_churn_customers": 27,
+      "false_churn_alerts": 460,
+      "true_no_churn": 575,
+      "predicted_churn_rate": 0.5727466288147622,
+      "churn_miss_rate": 0.07219251336898395
+    },
+    {
+      "threshold": 0.4,
+      "accuracy": 0.6983676366217175,
+      "precision": 0.463519313304721,
+      "recall": 0.8663101604278075,
+      "f1": 0.6039142590866728,
+      "predicted_churn_customers": 699,
+      "correctly_identified_churn": 324,
+      "missed_churn_customers": 50,
+      "false_churn_alerts": 375,
+      "true_no_churn": 660,
+      "predicted_churn_rate": 0.49609652235628104,
+      "churn_miss_rate": 0.13368983957219252
+    },
+    {
+      "threshold": 0.5,
+      "accuracy": 0.7395315826827538,
+      "precision": 0.5060449050086355,
+      "recall": 0.7834224598930482,
+      "f1": 0.614900314795383,
+      "predicted_churn_customers": 579,
+      "correctly_identified_churn": 293,
+      "missed_churn_customers": 81,
+      "false_churn_alerts": 286,
+      "true_no_churn": 749,
+      "predicted_churn_rate": 0.41092973740241306,
+      "churn_miss_rate": 0.21657754010695188
+    },
+    {
+      "threshold": 0.6,
+      "accuracy": 0.7629524485450674,
+      "precision": 0.5408163265306123,
+      "recall": 0.7085561497326203,
+      "f1": 0.6134259259259259,
+      "predicted_churn_customers": 490,
+      "correctly_identified_churn": 265,
+      "missed_churn_customers": 109,
+      "false_churn_alerts": 225,
+      "true_no_churn": 810,
+      "predicted_churn_rate": 0.34776437189496096,
+      "churn_miss_rate": 0.2914438502673797
+    },
+    {
+      "threshold": 0.7,
+      "accuracy": 0.7899219304471257,
+      "precision": 0.6037234042553191,
+      "recall": 0.606951871657754,
+      "f1": 0.6053333333333333,
+      "predicted_churn_customers": 376,
+      "correctly_identified_churn": 227,
+      "missed_churn_customers": 147,
+      "false_churn_alerts": 149,
+      "true_no_churn": 886,
+      "predicted_churn_rate": 0.2668559261887864,
+      "churn_miss_rate": 0.393048128342246
+    },
+    {
+      "threshold": 0.8,
+      "accuracy": 0.7963094393186657,
+      "precision": 0.7061611374407583,
+      "recall": 0.3983957219251337,
+      "f1": 0.5094017094017094,
+      "predicted_churn_customers": 211,
+      "correctly_identified_churn": 149,
+      "missed_churn_customers": 225,
+      "false_churn_alerts": 62,
+      "true_no_churn": 973,
+      "predicted_churn_rate": 0.1497515968772179,
+      "churn_miss_rate": 0.6016042780748663
+    }
+  ],
+  "classification_report": {
+    "No Churn": {
+      "precision": 0.9024096385542169,
+      "recall": 0.7236714975845411,
+      "f1-score": 0.8032171581769437,
+      "support": 1035.0
+    },
+    "Churn": {
+      "precision": 0.5060449050086355,
+      "recall": 0.7834224598930482,
+      "f1-score": 0.614900314795383,
+      "support": 374.0
+    },
+    "accuracy": 0.7395315826827538,
+    "macro avg": {
+      "precision": 0.7042272717814262,
+      "recall": 0.7535469787387946,
+      "f1-score": 0.7090587364861634,
+      "support": 1409.0
+    },
+    "weighted avg": {
+      "precision": 0.7971999789757588,
+      "recall": 0.7395315826827538,
+      "f1-score": 0.7532309981877998,
+      "support": 1409.0
+    }
+  },
+  "best_cv_score": 0.8459632485387553,
+  "best_params": {
+    "classifier": "LogisticRegression",
+    "classifier__C": 10.0,
+    "classifier__penalty": "l2"
+  },
+  "scoring": "roc_auc",
+  "train_rows": 5634,
+  "test_rows": 1409
+}

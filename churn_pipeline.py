@@ -17,6 +17,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 TARGET_COLUMN = "Churn"
 ID_COLUMN = "customerID"
 RANDOM_STATE = 42
+DEFAULT_CHURN_THRESHOLD = 0.50
+HIGH_RISK_THRESHOLD = 0.80
 
 NUMERIC_FEATURES = [
     "SeniorCitizen",
@@ -42,6 +44,12 @@ CATEGORICAL_FEATURES = [
     "PaperlessBilling",
     "PaymentMethod",
 ]
+
+RISK_LEVELS = {
+    "low": "Low Risk",
+    "moderate": "Moderate Risk",
+    "high": "High Risk",
+}
 
 
 @dataclass
@@ -132,13 +140,39 @@ def build_param_grid() -> list[dict[str, object]]:
     return [
         {
             "classifier": [logistic_regression],
-            "classifier__C": [0.1, 1.0, 10.0],
+            "classifier__C": [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0],
             "classifier__penalty": ["l1", "l2"],
+            "classifier__class_weight": ["balanced"],
         },
         {
             "classifier": [random_forest],
-            "classifier__n_estimators": [100, 200],
-            "classifier__max_depth": [None, 10],
-            "classifier__min_samples_leaf": [1, 2],
+            "classifier__n_estimators": [200, 400],
+            "classifier__max_depth": [6, 10, 14, None],
+            "classifier__min_samples_leaf": [1, 2, 4],
+            "classifier__max_features": ["sqrt", "log2"],
+            "classifier__class_weight": ["balanced"],
         },
     ]
+
+
+def predict_churn_labels(probabilities: object) -> pd.Series:
+    """Convert churn probabilities into Yes/No labels using the default threshold."""
+
+    probability_series = pd.Series(probabilities)
+    return probability_series.ge(DEFAULT_CHURN_THRESHOLD).map({False: "No", True: "Yes"})
+
+
+def assign_risk_levels(probabilities: object) -> pd.Series:
+    """Convert churn probabilities into low, moderate, and high risk levels."""
+
+    probability_series = pd.Series(probabilities)
+    risk_levels = pd.Series(RISK_LEVELS["high"], index=probability_series.index)
+    risk_levels = risk_levels.mask(
+        probability_series < HIGH_RISK_THRESHOLD,
+        RISK_LEVELS["moderate"],
+    )
+    risk_levels = risk_levels.mask(
+        probability_series < DEFAULT_CHURN_THRESHOLD,
+        RISK_LEVELS["low"],
+    )
+    return risk_levels

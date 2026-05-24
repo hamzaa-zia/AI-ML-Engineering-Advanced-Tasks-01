@@ -10,6 +10,7 @@ import joblib
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     classification_report,
     confusion_matrix,
     f1_score,
@@ -19,11 +20,20 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 
-from churn_pipeline import RANDOM_STATE, TARGET_COLUMN, build_param_grid, build_pipeline
+from churn_pipeline import (
+    RANDOM_STATE,
+    RISK_LEVELS,
+    TARGET_COLUMN,
+    assign_risk_levels,
+    build_param_grid,
+    build_pipeline,
+    predict_churn_labels,
+)
 
 
 DEFAULT_DATA_PATH = Path("WA_Fn-UseC_-Telco-Customer-Churn.csv")
 DEFAULT_OUTPUT_DIR = Path("outputs")
+BASELINE_METRICS_FILENAME = "baseline_metrics_before_tuning.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,17 +101,29 @@ def split_features_and_target(data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Seri
     return features, target.astype(int)
 
 
-def evaluate_model(model: object, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, object]:
-    predictions = model.predict(X_test)
+def evaluate_model(
+    model: object,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame]:
     probabilities = model.predict_proba(X_test)[:, 1]
+    predictions = predict_churn_labels(probabilities).map({"No": 0, "Yes": 1}).astype(int)
+    confusion_counts = get_confusion_counts(y_test, predictions)
+    risk_tier_summary = build_risk_tier_summary(y_test, probabilities)
+    threshold_metrics = build_threshold_metrics(y_test, probabilities)
 
-    return {
+    metrics = {
         "accuracy": accuracy_score(y_test, predictions),
         "precision": precision_score(y_test, predictions, zero_division=0),
         "recall": recall_score(y_test, predictions, zero_division=0),
         "f1": f1_score(y_test, predictions, zero_division=0),
         "roc_auc": roc_auc_score(y_test, probabilities),
+        "average_precision": average_precision_score(y_test, probabilities),
         "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
+        "confusion_matrix_breakdown": confusion_counts,
+        "churn_focus": build_churn_focus_metrics(y_test, predictions, confusion_counts),
+        "risk_tier_summary": risk_tier_summary.to_dict(orient="records"),
+        "threshold_metrics": threshold_metrics.to_dict(orient="records"),
         "classification_report": classification_report(
             y_test,
             predictions,
@@ -112,9 +134,225 @@ def evaluate_model(model: object, X_test: pd.DataFrame, y_test: pd.Series) -> di
         ),
     }
 
+    return metrics, risk_tier_summary, threshold_metrics
+
+
+def get_confusion_counts(y_true: pd.Series, predictions: pd.Series) -> dict[str, int]:
+    true_negative, false_positive, false_negative, true_positive = confusion_matrix(
+        y_true,
+        predictions,
+        labels=[0, 1],
+    ).ravel()
+
+    return {
+        "true_no_churn": int(true_negative),
+        "false_churn_alerts": int(false_positive),
+        "missed_churn_customers": int(false_negative),
+        "correctly_identified_churn": int(true_positive),
+    }
+
+
+def safe_divide(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def build_churn_focus_metrics(
+    y_true: pd.Series,
+    predictions: pd.Series,
+    confusion_counts: dict[str, int],
+) -> dict[str, float | int]:
+    actual_churn_customers = int(y_true.sum())
+    actual_no_churn_customers = int(len(y_true) - actual_churn_customers)
+    predicted_churn_customers = int(predictions.sum())
+    predicted_no_churn_customers = int(len(predictions) - predicted_churn_customers)
+
+    true_positive = confusion_counts["correctly_identified_churn"]
+    false_positive = confusion_counts["false_churn_alerts"]
+    false_negative = confusion_counts["missed_churn_customers"]
+    true_negative = confusion_counts["true_no_churn"]
+
+    return {
+        "actual_churn_customers": actual_churn_customers,
+        "actual_no_churn_customers": actual_no_churn_customers,
+        "predicted_churn_customers": predicted_churn_customers,
+        "predicted_no_churn_customers": predicted_no_churn_customers,
+        "correctly_identified_churn": true_positive,
+        "missed_churn_customers": false_negative,
+        "false_churn_alerts": false_positive,
+        "true_no_churn": true_negative,
+        "churn_capture_rate_recall": safe_divide(true_positive, actual_churn_customers),
+        "churn_alert_precision": safe_divide(true_positive, predicted_churn_customers),
+        "churn_miss_rate": safe_divide(false_negative, actual_churn_customers),
+        "false_alarm_rate": safe_divide(false_positive, actual_no_churn_customers),
+        "predicted_churn_rate": safe_divide(predicted_churn_customers, len(predictions)),
+        "actual_churn_rate": safe_divide(actual_churn_customers, len(y_true)),
+    }
+
+
+def build_risk_tier_summary(y_true: pd.Series, probabilities: object) -> pd.DataFrame:
+    probability_series = pd.Series(probabilities)
+    risk_order = [
+        RISK_LEVELS["low"],
+        RISK_LEVELS["moderate"],
+        RISK_LEVELS["high"],
+    ]
+
+    evaluation = pd.DataFrame(
+        {
+            "actual_churn": y_true.reset_index(drop=True),
+            "churn_probability": probability_series,
+            "risk_level": assign_risk_levels(probability_series),
+        }
+    )
+    evaluation["risk_level"] = pd.Categorical(
+        evaluation["risk_level"],
+        categories=risk_order,
+        ordered=True,
+    )
+
+    summary = (
+        evaluation.groupby("risk_level", observed=False)
+        .agg(
+            total_customers=("actual_churn", "size"),
+            actual_churners=("actual_churn", "sum"),
+            avg_churn_probability=("churn_probability", "mean"),
+            min_churn_probability=("churn_probability", "min"),
+            max_churn_probability=("churn_probability", "max"),
+        )
+        .reset_index()
+    )
+    summary["actual_non_churners"] = summary["total_customers"] - summary["actual_churners"]
+    summary["actual_churn_rate"] = summary.apply(
+        lambda row: safe_divide(row["actual_churners"], row["total_customers"]),
+        axis=1,
+    )
+    summary["share_of_test_customers"] = summary["total_customers"] / len(evaluation)
+    summary["share_of_actual_churners"] = summary["actual_churners"] / max(
+        int(evaluation["actual_churn"].sum()),
+        1,
+    )
+
+    return summary[
+        [
+            "risk_level",
+            "total_customers",
+            "actual_churners",
+            "actual_non_churners",
+            "actual_churn_rate",
+            "share_of_test_customers",
+            "share_of_actual_churners",
+            "avg_churn_probability",
+            "min_churn_probability",
+            "max_churn_probability",
+        ]
+    ]
+
+
+def build_threshold_metrics(
+    y_true: pd.Series,
+    probabilities: object,
+    thresholds: tuple[float, ...] = (0.30, 0.40, 0.50, 0.60, 0.70, 0.80),
+) -> pd.DataFrame:
+    probability_series = pd.Series(probabilities)
+    rows = []
+
+    for threshold in thresholds:
+        predictions = probability_series.ge(threshold).astype(int)
+        true_negative, false_positive, false_negative, true_positive = confusion_matrix(
+            y_true,
+            predictions,
+            labels=[0, 1],
+        ).ravel()
+        predicted_churn_customers = int(predictions.sum())
+
+        rows.append(
+            {
+                "threshold": threshold,
+                "accuracy": accuracy_score(y_true, predictions),
+                "precision": precision_score(y_true, predictions, zero_division=0),
+                "recall": recall_score(y_true, predictions, zero_division=0),
+                "f1": f1_score(y_true, predictions, zero_division=0),
+                "predicted_churn_customers": predicted_churn_customers,
+                "correctly_identified_churn": int(true_positive),
+                "missed_churn_customers": int(false_negative),
+                "false_churn_alerts": int(false_positive),
+                "true_no_churn": int(true_negative),
+                "predicted_churn_rate": safe_divide(
+                    predicted_churn_customers,
+                    len(predictions),
+                ),
+                "churn_miss_rate": safe_divide(false_negative, int(y_true.sum())),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
 
 def save_json(payload: dict[str, object], output_path: Path) -> None:
     output_path.write_text(json.dumps(to_json_safe(payload), indent=2), encoding="utf-8")
+
+
+def load_json(input_path: Path) -> dict[str, object]:
+    return json.loads(input_path.read_text(encoding="utf-8"))
+
+
+def get_nested_metric(metrics: dict[str, object], metric_path: str) -> float | int | None:
+    current: object = metrics
+
+    for key in metric_path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+
+    if isinstance(current, (int, float)):
+        return current
+
+    return None
+
+
+def build_metric_comparison(
+    before_metrics: dict[str, object],
+    after_metrics: dict[str, object],
+) -> pd.DataFrame:
+    comparison_metrics = {
+        "accuracy": "Accuracy",
+        "precision": "Churn Precision",
+        "recall": "Churn Recall",
+        "f1": "Churn F1",
+        "roc_auc": "ROC-AUC",
+        "average_precision": "Average Precision",
+        "churn_focus.missed_churn_customers": "Missed Churn Customers",
+        "churn_focus.false_churn_alerts": "False Churn Alerts",
+        "churn_focus.correctly_identified_churn": "Correctly Identified Churn",
+        "churn_focus.churn_miss_rate": "Churn Miss Rate",
+        "churn_focus.false_alarm_rate": "False Alarm Rate",
+    }
+    rows = []
+
+    for metric_path, label in comparison_metrics.items():
+        before_value = get_nested_metric(before_metrics, metric_path)
+        after_value = get_nested_metric(after_metrics, metric_path)
+
+        if before_value is None or after_value is None:
+            continue
+
+        rows.append(
+            {
+                "metric": label,
+                "before_tuning": before_value,
+                "after_tuning": after_value,
+                "absolute_change": after_value - before_value,
+                "relative_change_percent": safe_divide(
+                    after_value - before_value,
+                    before_value,
+                )
+                * 100,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def to_json_safe(value: object) -> object:
@@ -167,7 +405,7 @@ def main() -> None:
     grid_search.fit(X_train, y_train)
 
     best_pipeline = grid_search.best_estimator_
-    metrics = evaluate_model(best_pipeline, X_test, y_test)
+    metrics, risk_tier_summary, threshold_metrics = evaluate_model(best_pipeline, X_test, y_test)
     metrics.update(
         {
             "best_cv_score": grid_search.best_score_,
@@ -181,10 +419,21 @@ def main() -> None:
     model_path = args.output_dir / "telco_churn_pipeline.joblib"
     metrics_path = args.output_dir / "metrics.json"
     grid_results_path = args.output_dir / "grid_search_results.csv"
+    risk_tier_path = args.output_dir / "risk_tier_summary.csv"
+    threshold_metrics_path = args.output_dir / "threshold_metrics.csv"
+    baseline_metrics_path = args.output_dir / BASELINE_METRICS_FILENAME
+    metric_comparison_path = args.output_dir / "metric_comparison_before_after_tuning.csv"
 
     joblib.dump(best_pipeline, model_path)
     save_json(metrics, metrics_path)
     pd.DataFrame(grid_search.cv_results_).to_csv(grid_results_path, index=False)
+    risk_tier_summary.to_csv(risk_tier_path, index=False)
+    threshold_metrics.to_csv(threshold_metrics_path, index=False)
+
+    if baseline_metrics_path.exists():
+        before_metrics = load_json(baseline_metrics_path)
+        metric_comparison = build_metric_comparison(before_metrics, metrics)
+        metric_comparison.to_csv(metric_comparison_path, index=False)
 
     print("Training complete")
     print(f"Best model: {best_pipeline.named_steps['classifier'].__class__.__name__}")
@@ -194,6 +443,10 @@ def main() -> None:
     print(f"Saved model: {model_path}")
     print(f"Saved metrics: {metrics_path}")
     print(f"Saved grid results: {grid_results_path}")
+    print(f"Saved risk tier summary: {risk_tier_path}")
+    print(f"Saved threshold metrics: {threshold_metrics_path}")
+    if baseline_metrics_path.exists():
+        print(f"Saved before/after comparison: {metric_comparison_path}")
 
 
 if __name__ == "__main__":
