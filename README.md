@@ -1,12 +1,16 @@
 # 📊 Telco Customer Churn ML Pipeline
 
-This project builds a reusable machine learning pipeline for predicting customer churn from the Telco Churn Dataset. It started as a standard Scikit-learn pipeline task, then interpretability was added through churn probability risk levels, and finally the hyperparameters were tuned with `class_weight="balanced"` to reduce missed churn customers.
+This project builds a reusable machine learning pipeline for predicting customer churn from the Telco Churn Dataset. It started as a standard Scikit-learn pipeline task, then interpretability was added through churn probability risk levels, hyperparameters were tuned with `class_weight="balanced"`, and feature engineering was added to reduce false churn alerts without increasing missed churners.
 
 ---
 
 ## 🧭 Project Flow Diagram
 
-The project flow below was created with Excalidraw and shows how the work evolved from the base ML pipeline to interpretability and recall-focused fine-tuning.
+The project flow below was created with Excalidraw for the original pipeline stages. The current feature-engineered workflow is:
+
+```text
+Telco CSV -> Clean data -> Engineer churn features -> Preprocess -> GridSearchCV -> Threshold 0.443 -> Export + predictions
+```
 
 ![Project workflow diagram](<Project workflow diagram.png>)
 
@@ -25,6 +29,7 @@ The project covers:
 - Model export with `joblib`
 - Churn probability interpretation with risk levels
 - Before-and-after metric comparison after tuning
+- Feature engineering and comparison against the last version
 
 ---
 
@@ -48,11 +53,13 @@ After the base model worked, interpretability was added so predictions are easie
 - `predicted_churn`
 - `risk_level`
 
+The latest version uses a churn threshold of `0.443`. This threshold was selected after feature engineering because it reduces false churn alerts while keeping missed churners unchanged compared with the previous `0.40` version.
+
 Risk-level logic:
 
 ```text
-0.00 to 0.49 -> predicted_churn = No  -> Low Risk
-0.50 to 0.79 -> predicted_churn = Yes -> Moderate Risk
+0.000 to 0.442 -> predicted_churn = No  -> Low Risk
+0.443 to 0.799 -> predicted_churn = Yes -> Moderate Risk
 0.80 to 1.00 -> predicted_churn = Yes -> High Risk
 ```
 
@@ -62,13 +69,28 @@ This does not change the model itself. It makes the model output easier to read 
 
 The final improvement focused on tuning the model while keeping `class_weight="balanced"`. This was important because churn customers are the minority class, and removing balanced class weights caused the model to miss more real churners.
 
-The final tuning command used recall as the scoring metric:
+The final tuning command used recall as the scoring metric and a lower decision threshold:
 
 ```powershell
-python .\train_churn_pipeline.py --scoring recall --n-jobs -1
+python .\train_churn_pipeline.py --scoring recall --churn-threshold 0.443 --n-jobs -1
 ```
 
-The recall-focused tuned model reduced missed churners from `81` to `79` while keeping the class-balancing behavior.
+### 4. Feature Engineering Added
+
+Feature engineering was added after the recall-tuned version. The goal was to reduce false churn alerts without increasing missed churners.
+
+The new engineered features include:
+
+- `service_count`: number of optional services used by the customer
+- `support_service_count`: number of security, backup, protection, and support services
+- `streaming_service_count`: number of streaming services
+- `tenure_group`: grouped customer tenure ranges
+- `monthly_charge_per_tenure_month`: charge intensity compared with tenure
+- `total_to_monthly_charge_ratio`: approximate relationship between total and monthly charges
+- `is_high_value_short_tenure`: marks newer customers with high monthly charges
+- Interaction features such as `contract_tenure_group`, `contract_payment_profile`, and `internet_support_profile`
+
+After feature engineering and threshold adjustment, false churn alerts changed from `373` to `369`, while missed churners stayed at `50`.
 
 ---
 
@@ -114,6 +136,7 @@ Used for loading, cleaning, analyzing, and saving tabular data.
 Used for preprocessing, model training, hyperparameter tuning, evaluation, and pipeline construction.
 
 - `Pipeline` chains cleaning, preprocessing, and model training into one reusable workflow.
+- `BaseEstimator` and `TransformerMixin` make custom cleaning and feature engineering steps work inside a Scikit-learn pipeline.
 - `ColumnTransformer` applies separate transformations to numeric and categorical columns.
 - `SimpleImputer` fills missing values.
 - `StandardScaler` scales numeric columns.
@@ -156,9 +179,9 @@ Used to save evaluation metrics in a readable structured format.
 
 ### `dataclasses`
 
-Used to keep the custom data cleaner simple and readable.
+Used to keep the custom data cleaner and feature engineer simple and readable.
 
-- `@dataclass` defines the `TelcoDataCleaner` transformer settings.
+- `@dataclass` defines the `TelcoDataCleaner` and `TelcoFeatureEngineer` transformer settings.
 
 ---
 
@@ -180,10 +203,22 @@ The script separates:
 `churn_pipeline.py` builds this workflow:
 
 ```text
-TelcoDataCleaner -> ColumnTransformer -> Classifier
+TelcoDataCleaner -> TelcoFeatureEngineer -> ColumnTransformer -> Classifier
 ```
 
-### 4. Preprocess The Data
+### 4. Engineer Churn Features
+
+`TelcoFeatureEngineer` creates behavior and interaction features before scaling and encoding. These features help the model separate customers who only look risky from customers who are more likely to churn.
+
+Examples:
+
+- Service usage counts
+- Support service counts
+- Tenure groups
+- High-charge and short-tenure flags
+- Contract, payment, internet, support, and billing interaction features
+
+### 5. Preprocess The Data
 
 Numeric features:
 
@@ -195,7 +230,7 @@ Categorical features:
 - Missing values are filled with the most frequent value.
 - Text categories are converted with `OneHotEncoder`.
 
-### 5. Train And Tune Models
+### 6. Train And Tune Models
 
 `GridSearchCV` tunes:
 
@@ -210,7 +245,7 @@ class_weight = balanced
 
 This helps the model pay more attention to churn customers.
 
-### 6. Evaluate The Model
+### 7. Evaluate The Model
 
 The model is evaluated using:
 
@@ -225,7 +260,7 @@ The model is evaluated using:
 - Risk-tier summary
 - Threshold comparison
 
-### 7. Export And Reuse
+### 8. Export And Reuse
 
 The best pipeline is exported as:
 
@@ -239,13 +274,13 @@ outputs/telco_churn_pipeline.joblib
 
 ## 📈 Final Recall-Tuned Results
 
-The latest tuned model was selected using recall scoring while keeping class weights balanced.
+The latest tuned model uses feature engineering, recall scoring, and balanced class weights. The decision threshold is `0.443`, selected to reduce false churn alerts without increasing missed churners compared with the previous version.
 
 Best model:
 
 ```text
 LogisticRegression
-C = 0.3
+C = 0.01
 penalty = l1
 class_weight = balanced
 ```
@@ -253,23 +288,26 @@ class_weight = balanced
 Key metrics:
 
 ```text
-Accuracy:          0.7388
-Churn precision:   0.5051
-Churn recall:      0.7888
-F1-score:          0.6159
-ROC-AUC:           0.8421
-Average precision: 0.6361
+Decision threshold: 0.443
+Accuracy:           0.7026
+Churn precision:    0.4675
+Churn recall:       0.8663
+F1-score:           0.6073
+ROC-AUC:           0.8449
+Average precision: 0.6580
 ```
 
-Churn-focused comparison:
+Comparison with the last `0.40` version:
 
 ```text
-Missed churners:             81 -> 79
-Correctly identified churn:  293 -> 295
-False churn alerts:          286 -> 289
+Missed churners:             50 -> 50
+Correctly identified churn:  324 -> 324
+False churn alerts:          373 -> 369
+Churn precision:             0.4648 -> 0.4675
+Average precision:           0.6361 -> 0.6580
 ```
 
-This version slightly improves churn capture while accepting a small increase in false churn alerts.
+This version keeps the same churn capture level while slightly reducing false alerts. The improvement is small, but it matches the project constraint: do not increase missed churners.
 
 ---
 
@@ -284,8 +322,10 @@ This version slightly improves churn capture while accepting a small increase in
 |   |-- risk_tier_summary.csv
 |   |-- threshold_metrics.csv
 |   |-- baseline_metrics_before_tuning.json
-|   |-- accuracy_tuned_metrics.json
-|   |-- recall_tuned_balanced_metrics.json
+|   |-- pre_feature_engineering_metrics.json
+|   |-- pre_feature_engineering_risk_tier_summary.csv
+|   |-- pre_feature_engineering_threshold_metrics.csv
+|   |-- feature_engineering_comparison.csv
 |   `-- metric_comparison_before_after_tuning.csv
 |-- WA_Fn-UseC_-Telco-Customer-Churn.csv
 |-- Project workflow diagram.png
@@ -315,13 +355,19 @@ python .\train_churn_pipeline.py
 Run recall-focused tuning to miss fewer churn customers:
 
 ```powershell
-python .\train_churn_pipeline.py --scoring recall --n-jobs -1
+python .\train_churn_pipeline.py --scoring recall --churn-threshold 0.443 --n-jobs -1
 ```
 
 Generate predictions:
 
 ```powershell
 python .\predict_churn.py
+```
+
+Generate predictions with a custom churn threshold:
+
+```powershell
+python .\predict_churn.py --churn-threshold 0.443
 ```
 
 Run with custom paths:
@@ -344,12 +390,15 @@ Main generated files:
 - `outputs/threshold_metrics.csv`: threshold-level precision, recall, and miss-rate comparison
 - `outputs/churn_predictions.csv`: prediction output with probability, churn label, and risk level
 - `outputs/metric_comparison_before_after_tuning.csv`: before-and-after tuning comparison
+- `outputs/pre_feature_engineering_metrics.json`: saved metrics from the last version before feature engineering
+- `outputs/feature_engineering_comparison.csv`: comparison between the last version and the feature-engineered version
 
 ---
 
 ## ✅ Production-Oriented Practices
 
 - Preprocessing is saved inside the model pipeline.
+- Feature engineering is saved inside the model pipeline, so prediction data gets the same engineered columns as training data.
 - New categorical values are handled with `OneHotEncoder(handle_unknown="ignore")`.
 - The dataset is split before fitting to reduce data leakage.
 - Cross-validation is stratified to respect class imbalance.

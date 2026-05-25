@@ -8,7 +8,14 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from churn_pipeline import ID_COLUMN, TARGET_COLUMN, assign_risk_levels, predict_churn_labels
+from churn_pipeline import (
+    DEFAULT_CHURN_THRESHOLD,
+    HIGH_RISK_THRESHOLD,
+    ID_COLUMN,
+    TARGET_COLUMN,
+    assign_risk_levels,
+    predict_churn_labels,
+)
 
 
 DEFAULT_MODEL_PATH = Path("outputs") / "telco_churn_pipeline.joblib"
@@ -38,6 +45,18 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_PATH,
         help="CSV file where predictions will be saved.",
     )
+    parser.add_argument(
+        "--churn-threshold",
+        type=float,
+        default=DEFAULT_CHURN_THRESHOLD,
+        help="Probability threshold for predicting churn. Lower values reduce missed churners.",
+    )
+    parser.add_argument(
+        "--high-risk-threshold",
+        type=float,
+        default=HIGH_RISK_THRESHOLD,
+        help="Probability threshold for labeling a customer as High Risk.",
+    )
     return parser.parse_args()
 
 
@@ -62,8 +81,15 @@ def main() -> None:
 
     output = data[identifier_columns].copy()
     output["churn_probability"] = churn_probability
-    output["predicted_churn"] = predict_churn_labels(churn_probability)
-    output["risk_level"] = assign_risk_levels(churn_probability)
+    output["predicted_churn"] = predict_churn_labels(
+        churn_probability,
+        threshold=args.churn_threshold,
+    )
+    output["risk_level"] = assign_risk_levels(
+        churn_probability,
+        churn_threshold=args.churn_threshold,
+        high_risk_threshold=args.high_risk_threshold,
+    )
 
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(args.output_path, index=False)

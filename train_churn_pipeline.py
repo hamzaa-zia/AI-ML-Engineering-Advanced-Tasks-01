@@ -21,6 +21,8 @@ from sklearn.metrics import (
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 
 from churn_pipeline import (
+    DEFAULT_CHURN_THRESHOLD,
+    HIGH_RISK_THRESHOLD,
     RANDOM_STATE,
     RISK_LEVELS,
     TARGET_COLUMN,
@@ -34,6 +36,7 @@ from churn_pipeline import (
 DEFAULT_DATA_PATH = Path("WA_Fn-UseC_-Telco-Customer-Churn.csv")
 DEFAULT_OUTPUT_DIR = Path("outputs")
 BASELINE_METRICS_FILENAME = "baseline_metrics_before_tuning.json"
+PRE_FEATURE_ENGINEERING_METRICS_FILENAME = "pre_feature_engineering_metrics.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,6 +78,18 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Parallel jobs used by GridSearchCV. Use -1 to use all available CPU cores.",
     )
+    parser.add_argument(
+        "--churn-threshold",
+        type=float,
+        default=DEFAULT_CHURN_THRESHOLD,
+        help="Probability threshold used for final churn labels and metrics.",
+    )
+    parser.add_argument(
+        "--high-risk-threshold",
+        type=float,
+        default=HIGH_RISK_THRESHOLD,
+        help="Probability threshold used for High Risk labels.",
+    )
     return parser.parse_args()
 
 
@@ -105,14 +120,27 @@ def evaluate_model(
     model: object,
     X_test: pd.DataFrame,
     y_test: pd.Series,
+    churn_threshold: float = DEFAULT_CHURN_THRESHOLD,
+    high_risk_threshold: float = HIGH_RISK_THRESHOLD,
 ) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame]:
     probabilities = model.predict_proba(X_test)[:, 1]
-    predictions = predict_churn_labels(probabilities).map({"No": 0, "Yes": 1}).astype(int)
+    predictions = (
+        predict_churn_labels(probabilities, threshold=churn_threshold)
+        .map({"No": 0, "Yes": 1})
+        .astype(int)
+    )
     confusion_counts = get_confusion_counts(y_test, predictions)
-    risk_tier_summary = build_risk_tier_summary(y_test, probabilities)
+    risk_tier_summary = build_risk_tier_summary(
+        y_test,
+        probabilities,
+        churn_threshold=churn_threshold,
+        high_risk_threshold=high_risk_threshold,
+    )
     threshold_metrics = build_threshold_metrics(y_test, probabilities)
 
     metrics = {
+        "churn_threshold": churn_threshold,
+        "high_risk_threshold": high_risk_threshold,
         "accuracy": accuracy_score(y_test, predictions),
         "precision": precision_score(y_test, predictions, zero_division=0),
         "recall": recall_score(y_test, predictions, zero_division=0),
@@ -191,7 +219,12 @@ def build_churn_focus_metrics(
     }
 
 
-def build_risk_tier_summary(y_true: pd.Series, probabilities: object) -> pd.DataFrame:
+def build_risk_tier_summary(
+    y_true: pd.Series,
+    probabilities: object,
+    churn_threshold: float = DEFAULT_CHURN_THRESHOLD,
+    high_risk_threshold: float = HIGH_RISK_THRESHOLD,
+) -> pd.DataFrame:
     probability_series = pd.Series(probabilities)
     risk_order = [
         RISK_LEVELS["low"],
@@ -203,7 +236,11 @@ def build_risk_tier_summary(y_true: pd.Series, probabilities: object) -> pd.Data
         {
             "actual_churn": y_true.reset_index(drop=True),
             "churn_probability": probability_series,
-            "risk_level": assign_risk_levels(probability_series),
+            "risk_level": assign_risk_levels(
+                probability_series,
+                churn_threshold=churn_threshold,
+                high_risk_threshold=high_risk_threshold,
+            ),
         }
     )
     evaluation["risk_level"] = pd.Categorical(
@@ -253,12 +290,27 @@ def build_risk_tier_summary(y_true: pd.Series, probabilities: object) -> pd.Data
 def build_threshold_metrics(
     y_true: pd.Series,
     probabilities: object,
-    thresholds: tuple[float, ...] = (0.30, 0.40, 0.50, 0.60, 0.70, 0.80),
+    thresholds: tuple[float, ...] = (
+        0.10,
+        0.15,
+        0.20,
+        0.25,
+        0.30,
+        0.35,
+        0.40,
+        0.45,
+        0.50,
+        0.60,
+        0.70,
+        0.80,
+    ),
 ) -> pd.DataFrame:
     probability_series = pd.Series(probabilities)
     rows = []
 
-    for threshold in thresholds:
+    threshold_values = sorted(set(thresholds + (DEFAULT_CHURN_THRESHOLD,)))
+
+    for threshold in threshold_values:
         predictions = probability_series.ge(threshold).astype(int)
         true_negative, false_positive, false_negative, true_positive = confusion_matrix(
             y_true,
@@ -315,6 +367,8 @@ def get_nested_metric(metrics: dict[str, object], metric_path: str) -> float | i
 def build_metric_comparison(
     before_metrics: dict[str, object],
     after_metrics: dict[str, object],
+    before_label: str = "before_tuning",
+    after_label: str = "after_tuning",
 ) -> pd.DataFrame:
     comparison_metrics = {
         "accuracy": "Accuracy",
@@ -341,8 +395,8 @@ def build_metric_comparison(
         rows.append(
             {
                 "metric": label,
-                "before_tuning": before_value,
-                "after_tuning": after_value,
+                before_label: before_value,
+                after_label: after_value,
                 "absolute_change": after_value - before_value,
                 "relative_change_percent": safe_divide(
                     after_value - before_value,
@@ -405,7 +459,13 @@ def main() -> None:
     grid_search.fit(X_train, y_train)
 
     best_pipeline = grid_search.best_estimator_
-    metrics, risk_tier_summary, threshold_metrics = evaluate_model(best_pipeline, X_test, y_test)
+    metrics, risk_tier_summary, threshold_metrics = evaluate_model(
+        best_pipeline,
+        X_test,
+        y_test,
+        churn_threshold=args.churn_threshold,
+        high_risk_threshold=args.high_risk_threshold,
+    )
     metrics.update(
         {
             "best_cv_score": grid_search.best_score_,
@@ -422,7 +482,11 @@ def main() -> None:
     risk_tier_path = args.output_dir / "risk_tier_summary.csv"
     threshold_metrics_path = args.output_dir / "threshold_metrics.csv"
     baseline_metrics_path = args.output_dir / BASELINE_METRICS_FILENAME
+    pre_feature_metrics_path = args.output_dir / PRE_FEATURE_ENGINEERING_METRICS_FILENAME
     metric_comparison_path = args.output_dir / "metric_comparison_before_after_tuning.csv"
+    feature_engineering_comparison_path = (
+        args.output_dir / "feature_engineering_comparison.csv"
+    )
 
     joblib.dump(best_pipeline, model_path)
     save_json(metrics, metrics_path)
@@ -434,6 +498,19 @@ def main() -> None:
         before_metrics = load_json(baseline_metrics_path)
         metric_comparison = build_metric_comparison(before_metrics, metrics)
         metric_comparison.to_csv(metric_comparison_path, index=False)
+
+    if pre_feature_metrics_path.exists():
+        pre_feature_metrics = load_json(pre_feature_metrics_path)
+        feature_engineering_comparison = build_metric_comparison(
+            pre_feature_metrics,
+            metrics,
+            before_label="before_feature_engineering",
+            after_label="after_feature_engineering",
+        )
+        feature_engineering_comparison.to_csv(
+            feature_engineering_comparison_path,
+            index=False,
+        )
 
     print("Training complete")
     print(f"Best model: {best_pipeline.named_steps['classifier'].__class__.__name__}")
@@ -447,6 +524,8 @@ def main() -> None:
     print(f"Saved threshold metrics: {threshold_metrics_path}")
     if baseline_metrics_path.exists():
         print(f"Saved before/after comparison: {metric_comparison_path}")
+    if pre_feature_metrics_path.exists():
+        print(f"Saved feature engineering comparison: {feature_engineering_comparison_path}")
 
 
 if __name__ == "__main__":
